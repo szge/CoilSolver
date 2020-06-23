@@ -2,7 +2,10 @@ from multiprocessing import Pool
 from typing import Tuple
 
 import numpy
-
+"""Resources:
+https://stackoverflow.com/questions/20190668/multiprocessing-a-for-loop
+https://cuyu.github.io/python/2016/08/15/Terminate-multiprocess-in-Python-correctly-and-gracefully
+"""
 
 class CoilSolver:
     # test the alg starting level 1

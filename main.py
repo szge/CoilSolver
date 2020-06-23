@@ -7,6 +7,12 @@ import time
 import numpy
 import requests
 
+"""Resources:
+http://www.hacker.org/forum/viewtopic.php?t=1093
+https://docs.google.com/spreadsheets/d/1haVOjHmv1FbwTe6wuaShBAYTH-FWUpRFSENnQx9egyU/edit?usp=sharing
+
+"""
+
 
 class CoilSolver:
     username: str = "username"
