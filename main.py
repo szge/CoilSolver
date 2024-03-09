@@ -118,7 +118,7 @@ class CoilSolver:
             print("There was an error submitting the solution.")
 
     def solve_board_recursion(self, board: np.ndarray, x: int, y: int, path: str) -> tuple[bool, str]:
-        """Given a board and path, it will return [False, ""] if the path does not lead to a solution or it will return
+        """Given a board and path, it will return [False, ""] if the path does not lead to a solution, or
         [True, <PATH>] with the correct path
 
         :param board: the current state of the board
@@ -139,12 +139,11 @@ class CoilSolver:
             if self.check_solved(newboard):
                 return True, path + dir
 
-            if needs_flood_check and not self.flood_check(board_new, x_new, y_new):
-                return False, ""
-
-            succ, full_path = self.solve_board_recursion(newboard, x_new, y_new, path + dir)  # recurse
-            if succ:
-                return succ, full_path
+            if needs_flood_check and self.flood_check(board_new, x_new, y_new):
+                # recurse only if flood check passes
+                succ, full_path = self.solve_board_recursion(newboard, x_new, y_new, path + dir)
+                if succ:
+                    return succ, full_path
 
         return False, ""
 
@@ -191,6 +190,7 @@ class CoilSolver:
         :return: whether flood fill fills the whole board
         """
         dirs = self.legal_moves(board, x, y)
+        solvable = False
         for dir in dirs:
             checkboard = board.copy()
             if dir == "U":
@@ -201,9 +201,10 @@ class CoilSolver:
                 self.flood_fill(checkboard, x - 1, y)
             elif dir == "R":
                 self.flood_fill(checkboard, x + 1, y)
-            # if not self.check_solved(checkboard):
-            #     return False
-        return True
+            if self.check_solved(checkboard):
+                solvable = True
+                break
+        return solvable
 
     def flood_fill(self, tempboard: np.ndarray, x: int, y: int) -> None:
         """Starts flood filling tempboard from a given (<x>, <y>) position. Mutates tempboard
