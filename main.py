@@ -22,8 +22,8 @@ class CoilSolver:
         board = self.get_board()
         print(board)
         self.timer_start = time.perf_counter()
-        # self.solve_board(board)
-        self.solve_board_parallel(board)
+        self.solve_board(board)
+        # self.solve_board_parallel(board)
         print("Time to solve: %.3fs" % (time.perf_counter() - self.timer_start))
 
     def solve_board_parallel(self, board: np.ndarray[int]):
@@ -125,29 +125,26 @@ class CoilSolver:
         :param x: the current position's x value
         :param y: the current position's y value
         :param path: the current path
-        :return List[0]: whether the path was successful, True = succ
-        List[1]: if a path is successful, the path it took e.g. "RDLDRU"
+        :return (succ, full path)
         """
-
         if not self.neighbors_valid(board, x, y):
             return False, ""
 
-        valid_dirs = self.can_move(board, x, y)
+        valid_dirs = self.legal_moves(board, x, y)
 
-        if len(valid_dirs) > 0:
-            if self.flood_fill_check(board, x, y, valid_dirs[0]) is False:
-                return False, ""
-
-        for dirs in valid_dirs:
+        for dir in valid_dirs:
             newboard = board.copy()
-            result = self.move(newboard, x, y, dirs)
+            x_new, y_new, board_new, needs_flood_check = self.move(newboard, x, y, dir)
 
             if self.check_solved(newboard):
-                return True, path + dirs
+                return True, path + dir
 
-            thing = self.solve_board_recursion(newboard, result[0], result[1], path + dirs)  # recurse
-            if thing[0]:
-                return thing
+            if needs_flood_check and not self.flood_check(board_new, x_new, y_new):
+                return False, ""
+
+            succ, full_path = self.solve_board_recursion(newboard, x_new, y_new, path + dir)  # recurse
+            if succ:
+                return succ, full_path
 
         return False, ""
 
@@ -183,26 +180,30 @@ class CoilSolver:
             count += 1
         return count
 
-    def flood_fill_check(self, board: np.ndarray, x: int, y: int, direction: str) -> bool:
-        """If flood fill cannot fill the whole board it cannot be solved. Does not mutate tempboard.
+    def flood_check(self, board: np.ndarray, x: int, y: int) -> bool:
+        """If flood fill cannot fill the whole board it cannot be solved.
+        You only need check flood fill if by moving there are empty squares on both sides.
+        Does not mutate tempboard.
 
         :param board:
         :param x: current x position
         :param y: current y position
-        :param direction:
         :return: whether flood fill fills the whole board
         """
-        checkboard = board.copy()
-
-        if direction == "U":
-            self.flood_fill(checkboard, x, y - 1)
-        elif direction == "D":
-            self.flood_fill(checkboard, x, y + 1)
-        elif direction == "L":
-            self.flood_fill(checkboard, x - 1, y)
-        elif direction == "R":
-            self.flood_fill(checkboard, x + 1, y)
-        return self.check_solved(checkboard)
+        dirs = self.legal_moves(board, x, y)
+        for dir in dirs:
+            checkboard = board.copy()
+            if dir == "U":
+                self.flood_fill(checkboard, x, y - 1)
+            elif dir == "D":
+                self.flood_fill(checkboard, x, y + 1)
+            elif dir == "L":
+                self.flood_fill(checkboard, x - 1, y)
+            elif dir == "R":
+                self.flood_fill(checkboard, x + 1, y)
+            # if not self.check_solved(checkboard):
+            #     return False
+        return True
 
     def flood_fill(self, tempboard: np.ndarray, x: int, y: int) -> None:
         """Starts flood filling tempboard from a given (<x>, <y>) position. Mutates tempboard
@@ -215,23 +216,19 @@ class CoilSolver:
         rows, cols = tempboard.shape
         if tempboard[y][x] == 0:
             tempboard[y][x] = 1
-            # flood fill upwards
             if y > 0:
                 self.flood_fill(tempboard, x, y - 1)
-            # flood fill downwards
             if y < rows - 1:
                 self.flood_fill(tempboard, x, y + 1)
-            # flood fill leftwards
             if x > 0:
                 self.flood_fill(tempboard, x - 1, y)
-            # flood fill rightwards
             if x < cols - 1:
                 self.flood_fill(tempboard, x + 1, y)
 
     def check_solved(self, board: np.ndarray[int]) -> bool:
         return np.all(board == 1)
 
-    def can_move(self, board: np.ndarray, x: int, y: int) -> List[str]:
+    def legal_moves(self, board: np.ndarray, x: int, y: int) -> List[str]:
         """Finds the directions in which the player can move
 
         :param board: the board to be checked
@@ -253,7 +250,7 @@ class CoilSolver:
 
         return moves
 
-    def move(self, board: np.ndarray[int], x: int, y: int, direction: str) -> tuple[int, int, np.ndarray[int]]:
+    def move(self, board: np.ndarray[int], x: int, y: int, direction: str) -> tuple[int, int, np.ndarray[int], bool]:
         """Determines how a move affects the state of the board. This mutates tempboard.
 
         :param board: the current state of the board
@@ -265,27 +262,75 @@ class CoilSolver:
 
         board[y][x] = 1
         rows, cols = board.shape
-
+        needs_flood_check = False
+        dx, dy = 0, 0
         if direction == "U":
-            while y > 0 and board[y - 1][x] == 0:
-                board[y - 1][x] = 1
-                y -= 1
+            dy = -1
         elif direction == "D":
-            while y < rows - 1 and board[y + 1][x] == 0:
-                board[y + 1][x] = 1
-                y += 1
+            dy = 1
         elif direction == "L":
-            while x > 0 and board[y][x - 1] == 0:
-                board[y][x - 1] = 1
-                x -= 1
+            dx = -1
         elif direction == "R":
-            while x < cols - 1 and board[y][x + 1] == 0:
-                board[y][x + 1] = 1
-                x += 1
+            dx = 1
         else:
             print("An invalid direction was submitted to the move function")
 
-        return x, y, board
+        while self.is_valid_move(board, x, y, direction):
+            x += dx
+            y += dy
+            board[y][x] = 1
+
+        # if direction == "U":
+        #     emptyL = x > 0 and board[y][x - 1] == 0
+        #     emptyR = x < cols - 1 and board[y][x + 1] == 0
+        #     while y > 0 and board[y - 1][x] == 0:
+        #         y -= 1
+        #         board[y][x] = 1
+        #         emptyL = emptyL or (x > 0 and board[y][x - 1] == 0)
+        #         emptyR = emptyR or (x < cols - 1 and board[y][x + 1] == 0)
+        #     needs_flood_check = (emptyL and emptyR)
+        # elif direction == "D":
+        #     emptyL = x > 0 and board[y][x - 1] == 0
+        #     emptyR = x < cols - 1 and board[y][x + 1] == 0
+        #     while y < rows - 1 and board[y + 1][x] == 0:
+        #         y += 1
+        #         board[y][x] = 1
+        #         emptyL = emptyL or (x > 0 and board[y][x - 1] == 0)
+        #         emptyR = emptyR or (x < cols - 1 and board[y][x + 1] == 0)
+        #     needs_flood_check = (emptyL and emptyR)
+        # elif direction == "L":
+        #     emptyU = y > 0 and board[y - 1][x] == 0
+        #     emptyD = y < rows - 1 and board[y + 1][x] == 0
+        #     while x > 0 and board[y][x - 1] == 0:
+        #         x -= 1
+        #         board[y][x] = 1
+        #         emptyU = emptyU or (y > 0 and board[y - 1][x] == 0)
+        #         emptyD = emptyD or (y < rows - 1 and board[y + 1][x] == 0)
+        #     needs_flood_check = (emptyU and emptyD)
+        # elif direction == "R":
+        #     emptyU = y > 0 and board[y - 1][x] == 0
+        #     emptyD = y < rows - 1 and board[y + 1][x] == 0
+        #     while x < cols - 1 and board[y][x + 1] == 0:
+        #         x += 1
+        #         board[y][x] = 1
+        #         emptyU = emptyU or (y > 0 and board[y - 1][x] == 0)
+        #         emptyD = emptyD or (y < rows - 1 and board[y + 1][x] == 0)
+        #     needs_flood_check = (emptyU and emptyD)
+        # else:
+        #     print("An invalid direction was submitted to the move function")
+
+        return x, y, board, True
+
+    def is_valid_move(self, board: np.ndarray[int], x: int, y: int, dir: str) -> bool:
+        if dir == "U" and y > 0 and board[y - 1][x] == 0:
+            return True
+        if dir == "D" and y < board.shape[0] - 1 and board[y + 1][x] == 0:
+            return True
+        if dir == "L" and x > 0 and board[y][x - 1] == 0:
+            return True
+        if dir == "R" and x < board.shape[1] - 1 and board[y][x + 1] == 0:
+            return True
+        return False
 
 
 if __name__ == "__main__":
