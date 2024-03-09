@@ -1,47 +1,59 @@
+from __future__ import annotations
+from typing import List, Union
+import time
 import numpy
 import requests
-import time
-from typing import List, Union
+from bs4 import BeautifulSoup
+import re
+
+"""Resources:
+http://www.hacker.org/forum/viewtopic.php?t=1093
+https://docs.google.com/spreadsheets/d/1haVOjHmv1FbwTe6wuaShBAYTH-FWUpRFSENnQx9egyU/edit?usp=sharing
+
+"""
 
 
 class CoilSolver:
     username: str = "username"
     password: str = "password"
     url: str = "http://www.hacker.org/coil/index.php?name=" + username + "&password=" + password
-    boardX: int                                 # Number of columns
-    boardY: int                                 # Number of rows
-    board: numpy.ndarray                        # 2D array representing the board -- 1 for block, else 0s
-    timer_start: float = time.perf_counter()    # Timer start time for each level computation
-    level: int                                  # The current level number
+    boardX: int  # Number of columns
+    boardY: int  # Number of rows
+    board: numpy.ndarray  # 2D array representing the board -- 1 for block, else 0s
+    timer_start: float = time.perf_counter()  # Timer start time for each level computation
+    level: int  # The current level number
 
-    def parse_board(self, text) -> None:
-        """Converts the web page into a board that is human workable.
+    def __init__(self):
+        with open("login.txt", "r") as file:
+            self.username = file.readline().strip()
+            self.password = file.readline().strip()
 
-        :param text: the HTML of the web page as a string
-        :return:
-        """
-        level_index = int(text.find("Level: "))
-        line = text[level_index:text.find("<", level_index)]
-        self.level = int(line[7:])
-        # print("Level: " + str(self.level))
-
-        # find the line describing the board
-        game_index = int(text.find("value=\"x="))
-        line = text[game_index:text.find("\n", game_index)]
-        line = line[7:-4]
-        line = line.split("&")
-        self.boardX = int(line[0][2:])
-        # print("Board x: " + str(self.boardX))
-        self.boardY = int(line[1][2:])
-        # print("Board y: " + str(self.boardY))
-
-        game_text = line[2][6:]
-        self.board = numpy.zeros((self.boardY, self.boardX), dtype=int)
-        for y in range(self.boardY):
-            for x in range(self.boardX):
-                if game_text[y * self.boardX + x] == 'X':
-                    self.board[y][x] = 1
-        # print(self.board)
+    def parse_board(self) -> numpy.ndarray[int] | None:
+        url: str = "http://www.hacker.org/coil?name=" + self.username + "&password=" + self.password
+        response = requests.get(url)
+        if response.status_code == 200:
+            try:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                script_tag = soup.find('script', string=re.compile('boardStr'))
+                game_board_str = re.search(r'boardStr = "(.+?)"', script_tag.string).group(1)
+                width = int(re.search(r'width = (\d+)', script_tag.string).group(1))
+                height = int(re.search(r'height = (\d+)', script_tag.string).group(1))
+                board = numpy.zeros((height, width), dtype=int)
+                for i, char in enumerate(game_board_str):
+                    row, col = i // width, i % width
+                    if char == 'X':
+                        board[row, col] = 1
+                self.board = board
+                self.boardX = width
+                self.boardY = height
+                return board
+            except Exception as e:
+                print("There was an error parsing the page.", e)
+                print(response.text)
+                return None
+        else:
+            print("There was an error loading the page.")
+            return None
 
     def solve_board(self) -> None:
         """Applies some algorithm to <board> and attempts to solve it.
@@ -50,11 +62,12 @@ class CoilSolver:
         succ_x: int = 0
         succ_y: int = 0
 
+        print(self.board)
+
         for y in range(self.boardY):
             for x in range(self.boardX):
                 if self.board[y][x] == 0:
                     thing = self.solve_board_recursion(self.board, x, y, "")
-                    # whether or not a successful path has been found
                     if thing[0]:
                         # the actual path
                         succ_path = thing[1]
@@ -64,13 +77,11 @@ class CoilSolver:
             if succ_path != "":
                 break
 
-        # print("Start x: " + str(succ_x) + "\nStart y: " + str(succ_y) + "\nPath:" + succ_path)
-        # print(self.url + "?x=" + str(succ_x) + "&y=" + str(succ_y) + "&path=" + succ_path)
+        print(succ_x, succ_y, succ_path)
 
-        # restart whole process with new page
         response = requests.get(self.url + "&x=" + str(succ_x) + "&y=" + str(succ_y) + "&path=" + succ_path)
         if response.status_code == 200:
-            self.parse_board(response.text)
+            self.parse_board()
             self.solve_board()
         else:
             print("There was an error loading the page.")
@@ -83,7 +94,7 @@ class CoilSolver:
         :param x: the current position's x value
         :param y: the current position's y value
         :param path: the current path
-        :return List[0]: whether the path was successful, True = succ
+        :return List[0]: whether or not the path was successful, True = succ
         List[1]: if a path is successful, the path it took e.g. "RDLDRU"
 
         # >>> cs = CoilSolver()
@@ -338,7 +349,15 @@ class CoilSolver:
     def main(self) -> None:
         response = requests.get(self.url)
         if response.status_code == 200:
-            self.parse_board(response.text)
+            self.parse_board()
             self.solve_board()
         else:
             print("There was an error loading the page.")
+
+
+if __name__ == "__main__":
+    # import doctest
+    # doctest.testmod()
+
+    cs = CoilSolver()
+    cs.main()

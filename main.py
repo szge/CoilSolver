@@ -11,7 +11,6 @@ class CoilSolver:
     password: str = "password"
 
     def __init__(self):
-        # get username and password from login.txt
         with open("login.txt", "r") as file:
             self.username = file.readline().strip()
             self.password = file.readline().strip()
@@ -22,7 +21,7 @@ class CoilSolver:
         self.solve_board(board)
 
     def get_board(self) -> np.ndarray[int] | None:
-        url: str = "http://www.hacker.org/coil/index.php?name=" + self.username + "&password=" + self.password
+        url: str = "http://www.hacker.org/coil?name=" + self.username + "&password=" + self.password
         response = requests.get(url)
         if response.status_code == 200:
             try:
@@ -54,7 +53,7 @@ class CoilSolver:
                         print("Solved!", x, y, path)
                         self.submit_solution(x, y, path)
                         return
-
+        print("No solution found.")
         self.submit_solution(0, 0, "")
 
     def solve_board_recursion(self, board: np.ndarray[int], x: int, y: int, path: str) -> tuple[bool, str]:
@@ -73,8 +72,8 @@ class CoilSolver:
         """
 
         # if there are multiple cells with only one neighbor then it is impossible to solve
-        # if self.count_single_avoid_position(tempboard, x, y) >= 2:
-        #     return [False, ""]
+        if not self.neighbors_valid(board, x, y):
+            return False, ""
 
         valid_dirs: [str] = self.can_move(board, x, y)
         # print("valid dirs", valid_dirs)
@@ -96,6 +95,39 @@ class CoilSolver:
                 return succ, new_path
 
         return False, ""
+
+    def neighbors_valid(self, board: np.ndarray[int], curr_x: int, curr_y: int) -> bool:
+        """
+        If an empty cell only has one empty neighbor, it must be the last cell to be filled.
+        Ignore neighbors of the current (x, y) cell, since we can reach those.
+        :param board:
+        :param curr_x:
+        :param curr_y:
+        :return:
+        """
+        rows, cols = board.shape
+        single_empty_neighbors = 0
+        for y in range(cols):
+            for x in range(rows):
+                if board[y, x] == 0 and (x, y) != (curr_x, curr_y):
+                    if self.count_num_empty_neighbors(board, x, y) == 1:
+                        single_empty_neighbors += 1
+                        if single_empty_neighbors > 1:
+                            return False
+        return True
+
+    def count_num_empty_neighbors(self, board: np.ndarray[int], x: int, y: int) -> int:
+        rows, cols = board.shape
+        count = 0
+        if y > 0 and board[y - 1][x] == 0:
+            count += 1
+        if y < rows - 1 and board[y + 1][x] == 0:
+            count += 1
+        if x > 0 and board[y][x - 1] == 0:
+            count += 1
+        if x < cols - 1 and board[y][x + 1] == 0:
+            count += 1
+        return count
 
     def check_solved(self, board: np.ndarray[int]) -> bool:
         return np.all(board == 1)
@@ -175,7 +207,7 @@ class CoilSolver:
         return x, y, board
 
     def submit_solution(self, start_x: int, start_y: int, solution: str):
-        url: str = ("http://www.hacker.org/coil/index.php?name=" + self.username + "&password=" + self.password
+        url: str = ("http://www.hacker.org/coil?name=" + self.username + "&password=" + self.password
                     + "&x=" + str(start_x) + "&y=" + str(start_y) + "&path=" + solution)
         # response = requests.post(url, data={"x": start_x, "y": start_y, "path": solution})
         response = requests.get(url)
