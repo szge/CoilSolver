@@ -1,9 +1,11 @@
-from typing import List, Union
+from typing import List
 import time
 import numpy as np
 import requests
 from bs4 import BeautifulSoup
 import re
+import multiprocessing as mp
+from queue import Empty
 
 
 class CoilSolver:
@@ -20,8 +22,52 @@ class CoilSolver:
         board = self.get_board()
         print(board)
         self.timer_start = time.perf_counter()
-        self.solve_board(board)
+        # self.solve_board(board)
+        self.solve_board_parallel(board)
         print("Time to solve: %.3fs" % (time.perf_counter() - self.timer_start))
+
+    def solve_board_parallel(self, board: np.ndarray[int]):
+        unchecked_positions = mp.Queue()
+
+        zero_indices = np.transpose(np.nonzero(board == 0))
+        for y, x in zero_indices:
+            unchecked_positions.put((x, y))
+
+        print(f"Initial queue size: {unchecked_positions.qsize()}")
+
+        solution_found = mp.Value('b', False)  # solution found shared value
+
+        # Create worker processes
+        num_processes = mp.cpu_count()
+        processes = []
+        for _ in range(num_processes):
+            p = mp.Process(target=self.worker_solve, args=(board, unchecked_positions, solution_found))
+            processes.append(p)
+            p.start()
+
+        # Wait for processes to finish
+        for p in processes:
+            p.join()
+
+        if not solution_found.value:
+            print("No solution found.")
+            self.submit_solution(0, 0, "")
+
+    def worker_solve(self, board: np.ndarray[int], unchecked_positions: mp.Queue, solution_found: mp.Value):
+        while not solution_found.value:
+            try:
+                x, y = unchecked_positions.get(timeout=1)
+                if unchecked_positions.qsize() % 10 == 0:
+                    print(f"Remaining queue size: {unchecked_positions.qsize()}")
+            except Empty:
+                break
+
+            succ, path = self.solve_board_recursion(board, x, y, "")
+            if succ:
+                solution_found.value = True
+                print("Solved!", x, y, path)
+                self.submit_solution(x, y, path)
+                break
 
     def get_board(self) -> np.ndarray[int] | None:
         url = "http://www.hacker.org/coil?name=" + self.username + "&password=" + self.password
@@ -51,14 +97,13 @@ class CoilSolver:
             return None
 
     def solve_board(self, board: np.ndarray[int]):
-        for y in range(board.shape[0]):
-            for x in range(board.shape[1]):
-                if board[y, x] == 0:
-                    succ, path = self.solve_board_recursion(board, x, y, "")
-                    if succ:
-                        print("Solved!", x, y, path)
-                        self.submit_solution(x, y, path)
-                        return
+        zero_indices = np.transpose(np.nonzero(board == 0))
+        for y, x in zero_indices:
+            succ, path = self.solve_board_recursion(board, x, y, "")
+            if succ:
+                print("Solved!", x, y, path)
+                self.submit_solution(x, y, path)
+                return
         print("No solution found.")
         self.submit_solution(0, 0, "")
 
@@ -82,13 +127,6 @@ class CoilSolver:
         :param path: the current path
         :return List[0]: whether the path was successful, True = succ
         List[1]: if a path is successful, the path it took e.g. "RDLDRU"
-
-        # >>> cs = CoilSolver()
-        # >>> cs.boardX = 3
-        # >>> cs.boardY = 3
-        # >>> tempboard = np.array([[1, 0, 0],[0, 0, 0],[0, 0, 1]], int)
-        # >>> cs.solve_board_recursion(tempboard, 1, 0, "")
-        # True, 'RDLDR'
         """
 
         if not self.neighbors_valid(board, x, y):
@@ -122,15 +160,14 @@ class CoilSolver:
         :param curr_y:
         :return:
         """
-        rows, cols = board.shape
         single_empty_neighbors = 0
-        for y in range(rows):
-            for x in range(cols):
-                if board[y, x] == 0 and abs(curr_y - y) + abs(curr_x - x) > 1:
-                    if self.count_num_empty_neighbors(board, x, y) == 1:
-                        single_empty_neighbors += 1
-                        if single_empty_neighbors > 1:
-                            return False
+        zero_indices = np.transpose(np.nonzero(board == 0))
+
+        for y, x in zero_indices:
+            if abs(curr_y - y) + abs(curr_x - x) > 1 and self.count_num_empty_neighbors(board, x, y) == 1:
+                single_empty_neighbors += 1
+                if single_empty_neighbors > 1:
+                    return False
         return True
 
     def count_num_empty_neighbors(self, board: np.ndarray[int], x: int, y: int) -> int:
@@ -147,15 +184,13 @@ class CoilSolver:
         return count
 
     def flood_fill_check(self, board: np.ndarray, x: int, y: int, direction: str) -> bool:
-        """Uses flood fill starting at a given x, y position to determine if a board is solvable in a given state. If a
-        flood fill cannot fill the whole board it means it cannot be solved. Take in a board, returns False if it is not
-        solvable. Does not mutate tempboard.
+        """If flood fill cannot fill the whole board it cannot be solved. Does not mutate tempboard.
 
         :param board:
         :param x: current x position
         :param y: current y position
         :param direction:
-        :return:
+        :return: whether flood fill fills the whole board
         """
         checkboard = board.copy()
 
@@ -167,28 +202,15 @@ class CoilSolver:
             self.flood_fill(checkboard, x - 1, y)
         elif direction == "R":
             self.flood_fill(checkboard, x + 1, y)
-        if self.count_board_empty(checkboard) > 0:
-            return False
-        return True
+        return self.check_solved(checkboard)
 
     def flood_fill(self, tempboard: np.ndarray, x: int, y: int) -> None:
-        """Starts flood filling tempboard from a given (<x>, <y>) position.
-        Warning: mutates tempboard
+        """Starts flood filling tempboard from a given (<x>, <y>) position. Mutates tempboard
 
         :param tempboard: the board to be checked
         :param x: the current x position on the board
         :param y: the current y position on the board
         :return:
-
-        # >>> cs = CoilSolver()
-        # >>> cs.boardX = 3
-        # >>> cs.boardY = 3
-        # >>> tempboard = np.array([[1, 0, 0],  [0, 1, 0], [0, 0, 1]], int)
-        # >>> cs.flood_fill(tempboard, 2, 0)
-        # >>> print(tempboard)
-        # [[1 1 1]
-        #  [0 1 1]
-        #  [0 0 1]]
         """
         rows, cols = tempboard.shape
         if tempboard[y][x] == 0:
@@ -206,26 +228,6 @@ class CoilSolver:
             if x < cols - 1:
                 self.flood_fill(tempboard, x + 1, y)
 
-    def count_board_empty(self, board: np.ndarray) -> int:
-        """Counts how many empty spaces there are left on the board
-
-        :param board: the current state of the board
-        :return:
-
-        # >>> tempboard = np.array([[1, 1, 1],[0, 1, 1],[0, 0, 1]], int)
-        # >>> cs = CoilSolver()
-        # >>> cs.boardX = 3
-        # >>> cs.boardY = 3
-        # >>> cs.count_board_empty(tempboard)
-        # 3
-        """
-        rows, cols = board.shape
-        count = 0
-        for y in range(rows):
-            for x in range(cols):
-                count += board[y][x]
-        return rows * cols - count
-
     def check_solved(self, board: np.ndarray[int]) -> bool:
         return np.all(board == 1)
 
@@ -236,13 +238,6 @@ class CoilSolver:
         :param x: the current x position on the board
         :param y: the current y position on the board
         :return: str array that represents where valid moves are
-
-        # >>> cs = CoilSolver()
-        # >>> cs.boardX = 3
-        # >>> cs.boardY = 3
-        # >>> tempboard = np.array([[1, 0, 0],[0, 0, 0],[0, 0, 1]], int)
-        # >>> cs.can_move(tempboard, 1, 0)
-        # ['D', 'R']
         """
         moves = []
         rows, cols = board.shape
@@ -265,22 +260,7 @@ class CoilSolver:
         :param x: the current position's x value
         :param y: the current position's y value
         :param direction: the direction to be moved, either "U", "D", "L", "R"
-        :return: List[0]: the x-value of the position after the move
-        List[1]: the y-value of the position after the move
-
-        # >>> cs = CoilSolver()
-        # >>> cs.boardX = 3
-        # >>> cs.boardY = 3
-        # >>> tempboard = np.array([[1, 0, 0],[0, 0, 0],[0, 0, 1]], int)
-        # >>> output = cs.move(tempboard, 1, 0, "D")
-        # >>> output[0]
-        # 1
-        # >>> output[1]
-        # 2
-        # >>> print(output[2])
-        # [[1 1 0]
-        #  [0 1 0]
-        #  [0 1 1]]
+        :return: (new_x, new_y, new_board)
         """
 
         board[y][x] = 1
@@ -309,9 +289,6 @@ class CoilSolver:
 
 
 if __name__ == "__main__":
-    # import doctest
-    # doctest.testmod()
-
     cs = CoilSolver()
     while True:
         cs.solve()
